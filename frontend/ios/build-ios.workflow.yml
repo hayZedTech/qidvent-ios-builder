@@ -1,0 +1,93 @@
+name: Build iOS & Deploy to TestFlight
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-upload:
+    name: Archive, Sign & Upload to TestFlight
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install CocoaPods Dependencies
+        working-directory: frontend/ios/App
+        run: pod install
+
+      - name: Set App Version and Build Number
+        working-directory: frontend/ios/App
+        run: |
+          BUILD_NUM=${{ github.run_number }}
+          xcrun agvtool new-marketing-version 1.0.0
+          xcrun agvtool new-version -all $BUILD_NUM
+          echo "Configured iOS Version 1.0.0 (Build $BUILD_NUM)"
+
+      - name: Provision App Store Connect Signing Certificate & Profile
+        working-directory: frontend/ios/App
+        env:
+          ASC_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+          ASC_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_PRIVATE_KEY }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          node ci-sign.cjs setup
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/qidvent-signing.keychain-db"
+          KEYCHAIN_PASS="qidvent-ci-keychain"
+          security create-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security import "$RUNNER_TEMP/dist.p12" -P "qidventci" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASS" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain
+
+      - name: Build Signed iOS Archive (.xcarchive)
+        working-directory: frontend/ios/App
+        run: |
+          xcodebuild -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            archive
+
+      - name: Export Signed IPA (.ipa)
+        working-directory: frontend/ios/App
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/App.xcarchive \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath build/ipa
+          cp build/ipa/*.ipa build/ipa/Qidvent.ipa
+
+      - name: Upload Signed IPA Artifact to GitHub Run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qidvent-ios-ipa
+          path: |
+            frontend/ios/App/build/ipa/Qidvent.ipa
+
+      - name: Upload IPA to Apple TestFlight (App ID 6829002448)
+        working-directory: frontend/ios/App
+        run: |
+          echo "Uploading build/ipa/Qidvent.ipa to App Store Connect / TestFlight..."
+          xcrun altool --upload-app \
+            --type ios \
+            --file "build/ipa/Qidvent.ipa" \
+            --apiKey "$ASC_KEY_ID_VAL" \
+            --apiIssuer "$ASC_ISSUER_ID_VAL"
+
+      - name: Revoke Ephemeral CI Certificate & Clean Up Keychain
+        if: always()
+        working-directory: frontend/ios/App
+        run: |
+          node ci-sign.cjs cleanup
+          rm -rf ~/.appstoreconnect/private_keys
+          security delete-keychain "$RUNNER_TEMP/qidvent-signing.keychain-db" || true

@@ -1,0 +1,19 @@
+{
+	"appId": "com.qidvent.inventory",
+	"appName": "Qidvent",
+	"webDir": "dist",
+	"server": {
+		"androidScheme": "http",
+		"cleartext": true,
+		"allowNavigation": [
+			"qidvent.com",
+			"*.qidvent.com"
+		]
+	},
+	"android": {
+		"allowMixedContent": true,
+		"captureInput": true,
+		"webContentsDebuggingEnabled": true
+	},
+	"packageClassList": []
+}

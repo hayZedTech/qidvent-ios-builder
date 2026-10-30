@@ -1,0 +1,25 @@
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION BEGIN
+PassengerAppRoot "/home/qidvshpu/repositories/Inventory_Jimm/backend"
+PassengerBaseURI "/"
+PassengerNodejs "/home/qidvshpu/nodevenv/repositories/Inventory_Jimm/backend/20/bin/node"
+PassengerAppType node
+PassengerStartupFile server.js
+# DO NOT REMOVE. CLOUDLINUX PASSENGER CONFIGURATION END
+
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # 1. Pass API and health check requests directly to Node.js / Passenger
+  RewriteCond %{REQUEST_URI} ^/api [OR]
+  RewriteCond %{REQUEST_URI} ^/health
+  RewriteRule ^ - [L]
+
+  # 2. Serve physical static files directly
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # 3. Route all other requests to index.html for React SPA client-side routing
+  RewriteRule . /index.html [L]
+</IfModule>
